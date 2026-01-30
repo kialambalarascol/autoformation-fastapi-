@@ -1,5 +1,8 @@
 from fastapi import FastAPI, HTTPException,Depends
 from pydantic import BaseModel,Field
+from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
 
 app = FastAPI(title="apprentissage FastAPI")
 """
@@ -67,12 +70,50 @@ def cherche_article(item_id : int , nom : str):
 
 
 
+SQLALCHEMY_DATABASE_URL = "sqlite:///./magasin.db"
 
 
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base =  declarative_base()
 
 
+class  ProduitDB(Base):
+    __tablename__ = "produits"
+    id = Column(Integer , primary_key= True,index=True)
+    nom = Column(String, index = True)
+    prix = Column(Integer)
+
+Base.metadata.create_all(bind=engine)    
+
+def get_db():
+
+    db = SessionLocal()
+    try:
+        yield db  # On "prête" la session à la route
+    finally:
+        db.close() # On la récupère et on la ferme quoi qu'il arrive
+
+class ProduitSchema(BaseModel):
+    id: int
+    nom: str
+    prix: int
+
+    class Config:
+        from_attributes = True # Autorise Pydantic à lire les objets de la DB
 
 
+@app.get("/produits", tags=["Admin"], response_model= list[ProduitSchema])
+def get_produit(db : Session = Depends(get_db)):
+    resultat =db.query(ProduitDB).all()
+    print (resultat)
+    return resultat
+
+@app.get("/produit/{nom_produit}", tags=["Admin"],)
+def trouver(nom : str , db : Session = Depends(get_db)):
+    resultat = db.query(ProduitDB).filter(ProduitDB.nom == nom)
 
 
 
