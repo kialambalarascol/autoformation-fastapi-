@@ -3,43 +3,19 @@ from pydantic import BaseModel,Field
 from sqlalchemy import create_engine, Column, Integer, String,Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
+from passlib.context import CryptContext
+from datetime import datetime, timedelta
+from jose import jwt
 import os
 from dotenv import load_dotenv
-from passlib.context import CryptContext
+from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
+from pydantic_settings import BaseSettings
+
+load_dotenv()
+
+
 app = FastAPI(title="apprentissage FastAPI")
-"""
-class User(BaseModel):
-    username:str
-    is_premium: bool | None = None
-    level: int = 1
 
-@app.get("/")
-def main():
-    return {"message": "Bienvenue sur l'api"}
-
-
-@app.get("/users/{user_id}")
-def get_user(user_id : int , premium: bool = False):
-    return{"id": user_id,"is_premium" : premium}
-
-
-
-
-@app.post("/users/")
-def create_user(user:User):
-    return{"user":f"l'utilisateur {user.username} est niveau {user.level} premium : {user.is_premium}" }
-
-"""
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-
-def hash_password(password: str) -> str:
-    """Transforme un mot de passe clair en hachage illisible."""
-    return pwd_context.hash(password)
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Vérifie si le mot de passe saisi correspond au hachage en base."""
-    return pwd_context.verify(plain_password, hashed_password)
 
     
 class ItemInput(BaseModel):
@@ -80,10 +56,9 @@ def cherche_article(item_id : int , nom : str):
 
 
 
-load_dotenv()
 
 
-SQLALCHEMY_DATABASE_URL = f"postgresql://postgres:{os.getenv("mdpDB")}@localhost:{os.getenv("port")}/magasin"
+SQLALCHEMY_DATABASE_URL = f"postgresql://postgres:{os.getenv('mdpDB')}@localhost:{os.getenv('port')}/magasin"
 
 if SQLALCHEMY_DATABASE_URL is None:
     raise ValueError("L'URL de la base de données n'est pas configurée dans le fichier .env")
@@ -93,6 +68,31 @@ engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base =  declarative_base()
+
+
+
+
+
+class Settings(BaseSettings):
+    MAIL_USERNAME: str
+    MAIL_PASSWORD : str
+    MAIL_PORT: int
+    MAIL_SERVER : str
+    class Config:
+        env_file=".env"
+
+settings = Settings()
+
+mail_conf = ConnectionConfig(
+    MAIL_USERNAME=settings.MAIL_USERNAME,
+    MAIL_PASSWORD=settings.MAIL_PASSWORD,
+    MAIL_FROM=settings.MAIL_FROM,
+    MAIL_PORT=settings.MAIL_PORT,
+    MAIL_SERVER=settings.MAIL_SERVER,
+    MAIL_STARTTLS=True,
+    MAIL_SSL_TLS=False,
+    USE_CREDENTIALS=True
+)
 
 
 class  ProduitDB(Base):
@@ -282,61 +282,5 @@ def supprimer_plat(plat_id: int, db: Session = Depends(get_db)):
     db.delete(db_plat)
     db.commit() # Toujours avec les parenthèses !
     return {"status": "success", "message": f"Plat {plat_id} supprimé"}
-
-
-class UtilisateurDB(Base):
-    __tablename__ = "utilisateurs"
-
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True, nullable=False)
-    hashpassword = Column(String, nullable=False)
-
-
-class UtilisateurDB_Schema(BaseModel):
-    id: int
-    username: str
-
-    # Cette configuration est obligatoire pour que Pydantic 
-    # puisse lire les données directement depuis SQLAlchemy
-    class Config:
-        from_attributes = True
-
-
-class UserCreate(BaseModel):
-    username: str = Field(..., min_length=3, max_length=50)
-    password: str = Field(..., min_length=8) # Sécurité : minimum 8 caractères
-
-    class Config:
-        from_attributes = True
-
-
-
-# --- UPDATE UTILISATEUR ---
-@app.put("/utilisateur/{user_id}", response_model=UtilisateurDB_Schema, tags=["Admin"])
-def modifier_utilisateur(user_id: int, user_in: UserCreate, db: Session = Depends(get_db)):
-    db_user = db.query(UtilisateurDB).filter(UtilisateurDB.id == user_id).first()
-    
-    if not db_user:
-        raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
-    
-    db_user.username = user_in.username
-    db_user.hashpassword = user_in.password # À l'avenir, on hachera ici
-    
-    db.commit()
-    db.refresh(db_user)
-    return db_user
-
-# --- DELETE UTILISATEUR ---
-@app.delete("/utilisateur/{user_id}", tags=["Admin"])
-def supprimer_utilisateur(user_id: int, db: Session = Depends(get_db)):
-    db_user = db.query(UtilisateurDB).filter(UtilisateurDB.id == user_id).first()
-    
-    if not db_user:
-        raise HTTPException(status_code=404, detail="User introuvable")
-    
-    db.delete(db_user)
-    db.commit()
-    return {"message": f"L'utilisateur {db_user.username} a été effacé"}
-
 
 Base.metadata.create_all(bind=engine)    
