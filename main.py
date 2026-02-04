@@ -1,22 +1,18 @@
 from fastapi import FastAPI, HTTPException,Depends
 from pydantic import BaseModel,Field
-from sqlalchemy import create_engine, Column, Integer, String,Boolean
+from sqlalchemy import create_engine, Column, Integer, String,Boolean,Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
-from passlib.context import CryptContext
-from datetime import datetime, timedelta
-from jose import jwt
 import os
 from dotenv import load_dotenv
-from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
-from pydantic_settings import BaseSettings
+from  routers import mail,securite
 
 load_dotenv()
 
 
 app = FastAPI(title="apprentissage FastAPI")
 
-
+app.include_router(mail.router)
     
 class ItemInput(BaseModel):
     nom :str
@@ -61,7 +57,7 @@ def cherche_article(item_id : int , nom : str):
 SQLALCHEMY_DATABASE_URL = f"postgresql://postgres:{os.getenv('mdpDB')}@localhost:{os.getenv('port')}/magasin"
 
 if SQLALCHEMY_DATABASE_URL is None:
-    raise ValueError("L'URL de la base de données n'est pas configurée dans le fichier .env")
+    raise ValueError("L'URL de la base de donnees n'est pas configuree dans le fichier .env")
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 
@@ -71,28 +67,6 @@ Base =  declarative_base()
 
 
 
-
-
-class Settings(BaseSettings):
-    MAIL_USERNAME: str
-    MAIL_PASSWORD : str
-    MAIL_PORT: int
-    MAIL_SERVER : str
-    class Config:
-        env_file=".env"
-
-settings = Settings()
-
-mail_conf = ConnectionConfig(
-    MAIL_USERNAME=settings.MAIL_USERNAME,
-    MAIL_PASSWORD=settings.MAIL_PASSWORD,
-    MAIL_FROM=settings.MAIL_FROM,
-    MAIL_PORT=settings.MAIL_PORT,
-    MAIL_SERVER=settings.MAIL_SERVER,
-    MAIL_STARTTLS=True,
-    MAIL_SSL_TLS=False,
-    USE_CREDENTIALS=True
-)
 
 
 class  ProduitDB(Base):
@@ -109,7 +83,54 @@ def get_db():
     try:
         yield db  # On "prête" la session à la route
     finally:
-        db.close() # On la récupère et on la ferme quoi qu'il arrive
+        db.close() # On la recupere et on la ferme quoi qu'il arrive
+
+
+class UtilisateurDB(Base):
+    __tablename__ = "utilisateur"
+    id = Column(Integer, primary_key=True, index=True)
+    nom = Column(String)
+    mdp = Column(Text)
+
+class UtilisateurIn(BaseModel):
+    nom: str
+    mdp : str
+    class Config:
+        from_attributes=True
+
+class UtilisateurOut(BaseModel):
+    id : int
+    nom: str
+
+@app.post("/inscription", tags=["utilisateurs"])
+def ajoutUser(userData: UtilisateurIn,db: Session = Depends(get_db)):
+    mdphashe=userData.mdp
+    mdphashe=securite.hashpassword(mdphashe)
+    verif  = db.query(UtilisateurDB).filter( UtilisateurDB.nom == userData.nom ).first()
+    if verif :
+        raise HTTPException(status_code=401,detail="utilisateur deja existant")
+    ajout = UtilisateurDB(nom=userData.nom,mdp=mdphashe)
+    db.add(ajout)
+    db.commit()
+    db.refresh(ajout)
+    return{"message": f"utilisateur {userData.nom} a ete cree"}
+
+
+@app.delete("/suppression",tags=["Admin"])
+def supUser(nom:str ,db: Session = Depends(get_db)):
+    supp = db.query(UtilisateurDB).filter(UtilisateurDB.nom == nom).first()
+    if supp:
+        db.delete(supp)
+        db.commit()
+        return {"message": f"utilisateur {nom} supprime"}
+    raise HTTPException(status_code=404,detail="utilisateur inexistant")
+
+@app.get("/login",tags=["utilisateurs"])
+def connexion(nom :  str , mot_de_passe : str , db : Session = Depends(get_db)):
+    verification_Nom =   db.query(UtilisateurDB).filter(UtilisateurDB.nom==nom).first()
+    verification_mdp = dn.query(UtilisateurDB).filter(UtilisateurDB.)
+    if(verification_Nom):
+
 
 class ProduitSchema(BaseModel):
     id: int
@@ -174,20 +195,20 @@ class CommandeCafe(BaseModel):
 
 @app.post("/commander")
 def commander(commande : CommandeCafe):
-    return {"commande":f"Votre {commande.nomCafe} {commande.taille} avec {commande.sucre} est en préparation"}
+    return {"commande":f"Votre {commande.nomCafe} {commande.taille} avec {commande.sucre} est en preparation"}
 
 
 def verifBadge(couleur : str):
     if couleur !="red":
-        raise HTTPException(status_code=403 , detail =" accès non autorisé")
+        raise HTTPException(status_code=403 , detail =" accès non autorise")
     return couleur
 
-@app.get("/salle-serveur/", tags=["sécurité"])
+@app.get("/salle-serveur/", tags=["securite"])
 def accesUser(data : str = Depends(verifBadge)):
     return {"message": f"Vous avez accès au salle serveur et à la zone VIP"}
 
 
-@app.get("/zone-VIP/", tags=["sécurité"])
+@app.get("/zone-VIP/", tags=["securite"])
 def acces(data: str =  Depends(verifBadge)):
     return {"message": f"Vous avez accès au salle serveur et à la zone VIP"}
 
@@ -199,7 +220,7 @@ def get_eleve(nom : str ,age : int |None = None):
     else:
         return(f"Bonjour {nom}")
 
-""" Ici nous rentrons dans l'utilisation des class via pydantic , utilisé pour la methode post et aussi dans l'utilisation des Field pour gérer les erreurs et imprévue"""
+""" Ici nous rentrons dans l'utilisation des class via pydantic , utilise pour la methode post et aussi dans l'utilisation des Field pour gerer les erreurs et imprevue"""
 class Produit(BaseModel):
     nom: str = Field(min_length = 2)
     prix : float = Field(gt=0) 
@@ -225,7 +246,7 @@ def verifAge(user:User):
     if (user.age < 18 ):
         raise HTTPException(status_code=403,detail="Accès interdit aux mineurs ")
     elif (user.pseudo == "admin"):
-        raise HTTPException(status_code=401,detail="Pseudo réservé")
+        raise HTTPException(status_code=401,detail="Pseudo reserve")
     else:
         return {"message": f" Bienvenue {user.pseudo} !"}
 
@@ -243,7 +264,7 @@ class ConvertisseurOutput(BaseModel):
 """ La j'apprend a diviser mes parametres pour l'utiliser dans plusieur partie de mon code"""
 def verif_clef(convertisseur: ConvertisseurInput):
         if convertisseur.secret_key != "1234":
-            raise HTTPException(status_code=401,detail="mdp érroné")
+            raise HTTPException(status_code=401,detail="mdp errone")
         return convertisseur
 
 @app.post("/convert/", response_model=ConvertisseurOutput,tags=["finance"], summary="converti des euro en dollars")
@@ -262,7 +283,7 @@ def modifier_plat(plat_id: int, plat_in: PlatCreate, db: Session = Depends(get_d
     if not db_plat:
         raise HTTPException(status_code=404, detail="Plat introuvable")
     
-    # 2. Mise à jour des données
+    # 2. Mise à jour des donnees
     db_plat.nom = plat_in.nom
     db_plat.en_stock = plat_in.en_stock
     
@@ -281,6 +302,6 @@ def supprimer_plat(plat_id: int, db: Session = Depends(get_db)):
     
     db.delete(db_plat)
     db.commit() # Toujours avec les parenthèses !
-    return {"status": "success", "message": f"Plat {plat_id} supprimé"}
+    return {"status": "success", "message": f"Plat {plat_id} supprime"}
 
 Base.metadata.create_all(bind=engine)    
