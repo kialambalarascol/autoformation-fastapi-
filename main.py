@@ -1,8 +1,9 @@
-from fastapi import FastAPI, HTTPException,Depends
+from fastapi import FastAPI , HTTPException,Depends
 from pydantic import BaseModel,Field
 from sqlalchemy import create_engine, Column, Integer, String,Boolean,Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
+from fastapi.security import OAuth2PasswordRequestForm
 import os
 from dotenv import load_dotenv
 from  routers import mail,securite
@@ -54,7 +55,7 @@ def cherche_article(item_id : int , nom : str):
 
 
 
-SQLALCHEMY_DATABASE_URL = f"postgresql://postgres:{os.getenv('mdpDB')}@localhost:{os.getenv('port')}/magasin"
+SQLALCHEMY_DATABASE_URL = f"postgresql+pg8000://postgres:{os.getenv('mdpDB')}@localhost:{os.getenv('port')}/magasin"
 
 if SQLALCHEMY_DATABASE_URL is None:
     raise ValueError("L'URL de la base de donnees n'est pas configuree dans le fichier .env")
@@ -101,12 +102,14 @@ class UtilisateurIn(BaseModel):
 class UtilisateurOut(BaseModel):
     id : int
     nom: str
+    class Config:
+        from_attributes = True
 
 @app.post("/inscription", tags=["utilisateurs"])
 def ajoutUser(userData: UtilisateurIn,db: Session = Depends(get_db)):
     mdphashe=userData.mdp
     mdphashe=securite.hashpassword(mdphashe)
-    verif  = db.query(UtilisateurDB).filter( UtilisateurDB.nom == userData.nom ).first()
+    verif  = db.query(UtilisateurDB).filter( UtilisateurDB.nom == userData.nom,  ).first()
     if verif :
         raise HTTPException(status_code=401,detail="utilisateur deja existant")
     ajout = UtilisateurDB(nom=userData.nom,mdp=mdphashe)
@@ -125,11 +128,22 @@ def supUser(nom:str ,db: Session = Depends(get_db)):
         return {"message": f"utilisateur {nom} supprime"}
     raise HTTPException(status_code=404,detail="utilisateur inexistant")
 
-@app.get("/login",tags=["utilisateurs"])
-def connexion(nom :  str , mot_de_passe : str , db : Session = Depends(get_db)):
-    verification_Nom =   db.query(UtilisateurDB).filter(UtilisateurDB.nom==nom).first()
-    verification_mdp = dn.query(UtilisateurDB).filter(UtilisateurDB.)
-    if(verification_Nom):
+
+@app.post("/login",tags=["utilisateurs"])
+def connexion(formData :  OAuth2PasswordRequestForm = Depends(), db : Session = Depends(get_db)):
+    verificationUser =   db.query(UtilisateurDB).filter(UtilisateurDB.nom==formData.username).first()
+    if(verificationUser and securite.verifMdp(formData.password, verificationUser.mdp)):
+            user={"sub":verificationUser.nom}
+            token = securite.token(user)
+            return {"access_token":token,"token_type":"bearer"}
+    else:
+        raise HTTPException(status_code=401,detail="mot de passe ou utilisateur errone")
+            
+
+@app.get("/trouver",tags=["utilisateur"],response_model=list[UtilisateurOut])
+def trouverUser(db:Session = Depends(get_db),nom_user : str =Depends(securite.get_token) ):
+    rslt = db.query(UtilisateurDB).all()
+    return rslt
 
 
 class ProduitSchema(BaseModel):
@@ -180,7 +194,6 @@ def ajouterplat(plat :  PlatCreate ,db : Session= Depends(get_db)):
     db.refresh(ajout)
     rslt = db.query(PlatDB).all()
     return rslt
-
 
 
 
