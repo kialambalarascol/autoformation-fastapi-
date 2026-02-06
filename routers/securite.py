@@ -4,13 +4,13 @@ from jose import jwt,JWTError
 from fastapi import HTTPException,Depends
 from fastapi.security import OAuth2PasswordBearer
 import os
+from enum import Enum
 from dotenv import load_dotenv
 load_dotenv()
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
-
 def hashpassword(password :  str )-> str:
     return pwd_context.hash(password)
 
@@ -35,3 +35,9 @@ def get_token(token :  str = Depends(oauth2_scheme) ):
     except JWTError as e:
         print(f"Détail de l'erreur : {e}")
         raise HTTPException(status_code=401,detail="session exipire ou invalide")
+    
+class TypeUser(str, Enum):
+    admin="Gestionnaire"
+    employe="Technitien"
+
+

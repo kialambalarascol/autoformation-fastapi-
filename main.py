@@ -5,6 +5,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from fastapi.security import OAuth2PasswordRequestForm
 import os
+import enum
 from dotenv import load_dotenv
 from  routers import mail,securite
 
@@ -34,6 +35,12 @@ def verif_admin(mdp :str ):
 def article_vente(nb_article : int):
     return {"nombre d'article": nb_article}
 
+
+@app.get("/stock/{item_id}", tags=["Public"])
+def cherche_article(item_id : int , nom : str):
+    return {"nom": nom,"article": item_id}
+
+
 @app.post("/stock/ajouter",response_model=ItemOutput, tags=["Admin"])
 def calcule(item : ItemInput ,data : str = Depends(verif_admin)):
     prix_ttc = item.prix * 1.2 
@@ -43,13 +50,6 @@ def calcule(item : ItemInput ,data : str = Depends(verif_admin)):
     stock = False
     return {"nom": item.nom,"prix_ttc":prix_ttc,"en_stock": stock}
     
-
-
-@app.get("/stock/{item_id}", tags=["Public"])
-def cherche_article(item_id : int , nom : str):
-    return {"nom": nom,"article": item_id}
-
-
 
 
 
@@ -92,10 +92,12 @@ class UtilisateurDB(Base):
     id = Column(Integer, primary_key=True, index=True)
     nom = Column(String)
     mdp = Column(Text)
+    role = Column(String, default ="Technitien",nullable=False)
 
 class UtilisateurIn(BaseModel):
     nom: str
     mdp : str
+    role : securite.TypeUser = securite.TypeUser.employe
     class Config:
         from_attributes=True
 
@@ -105,14 +107,21 @@ class UtilisateurOut(BaseModel):
     class Config:
         from_attributes = True
 
+def verifAdmin(nom_utilisateur :  str = Depends(securite.get_token), db : Session = Depends(get_db)):
+    user=db.query(UtilisateurDB).filter(UtilisateurDB.nom==nom_utilisateur).first()
+
+    if not user or  user.role != "Gestionnaire":
+        raise HTTPException(status_code=403, detail="Accès refusé : réservé aux gestionnaires")
+    return user
+
 @app.post("/inscription", tags=["utilisateurs"])
 def ajoutUser(userData: UtilisateurIn,db: Session = Depends(get_db)):
     mdphashe=userData.mdp
     mdphashe=securite.hashpassword(mdphashe)
-    verif  = db.query(UtilisateurDB).filter( UtilisateurDB.nom == userData.nom,  ).first()
+    verif  = db.query(UtilisateurDB).filter( UtilisateurDB.nom == userData.nom, ).first()
     if verif :
         raise HTTPException(status_code=401,detail="utilisateur deja existant")
-    ajout = UtilisateurDB(nom=userData.nom,mdp=mdphashe)
+    ajout = UtilisateurDB(nom=userData.nom,mdp=mdphashe,role = userData.role)
     db.add(ajout)
     db.commit()
     db.refresh(ajout)
@@ -141,7 +150,7 @@ def connexion(formData :  OAuth2PasswordRequestForm = Depends(), db : Session = 
             
 
 @app.get("/trouver",tags=["utilisateur"],response_model=list[UtilisateurOut])
-def trouverUser(db:Session = Depends(get_db),nom_user : str =Depends(securite.get_token) ):
+def trouverUser(userType: UtilisateurDB = Depends (verifAdmin),db:Session = Depends(get_db),nom_user : str =Depends(securite.get_token) ):
     rslt = db.query(UtilisateurDB).all()
     return rslt
 
